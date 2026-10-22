@@ -16,6 +16,8 @@ An importable n8n workflow that tracks daily token usage of a Strata inference s
    mysql -h MYSQL_HOST -u SCHEMA_ADMIN -p strata_monitoring < schema.sql
    ```
 
+   Use a SQL client that supports `DELIMITER`, such as the MySQL CLI or a compatible MySQL Workbench version. A script runner that splits procedure bodies at every semicolon will fail with error 1064.
+
    Installation also runs the two read-only reporting queries. Reinstall routines only while the workflow is inactive. The installing account becomes the routines' definer and must retain the underlying table privileges.
 
 2. Provision a separate n8n database account through your normal password management process. Grant it these permissions, substituting its account and host:
@@ -33,6 +35,19 @@ An importable n8n workflow that tracks daily token usage of a Strata inference s
 4. Open **Tracker Configuration** to set `instance_id`, `strata_url`, `input_metric` and `output_metric`. `strata_url` is the server's base URL (scheme, host, port) with no path or trailing slash; the workflow appends `/v1/status` and `/metrics` itself. Keep the same instance ID across executions and use a new ID for a genuinely different server/counter source. Do not include a trailing slash in the URL.
 
 5. Keep workflow timezone **Asia/Hong_Kong** (or change it consistently — `recorded_at` is stored in the workflow's timezone, and reporting connections must match it). Each HTTP request has a 15-second timeout; workflow execution timeout is 90 seconds. Execute once manually, verify the baseline below, then publish/activate the workflow for automatic polling. n8n must remain running. Schedule changes take effect when the workflow is published/activated.
+
+## Upgrade an existing database
+
+Deactivate all tracker workflows sharing the database and back up the database. Run the one-time migration before reinstalling the routines:
+
+```sh
+mysql -h MYSQL_HOST -u SCHEMA_ADMIN -p strata_monitoring < migrations/001_usage_date.sql
+mysql -h MYSQL_HOST -u SCHEMA_ADMIN -p strata_monitoring < schema.sql
+```
+
+The migration adds `usage_date` and backfills historical rows from the previous snapshot's `recorded_at`, separately for each instance in ID order. Each instance's first row uses its own date. Run it only on the old schema without `usage_date`; new installations use `schema.sql` directly. If a statement fails, keep the workflows inactive and inspect the database before retrying, since MySQL DDL is not transactional.
+
+The updated insert procedure derives the date from the previous snapshot inside the existing transaction, so `workflow.json` and its procedure arguments stay compatible. Update dashboard queries to group/filter by `usage_date`, verify the rows, then reactivate polling.
 
 ## Credentials
 
@@ -90,14 +105,14 @@ The lease covers the polling/accounting critical section; expired executions can
 
 `schema.sql` includes daily totals and today's totals for `strata-p40`. Change the filter if you change the instance ID. Run `SET SESSION time_zone = '+08:00';` in **each reporting connection**, including dashboards, before using `CURRENT_DATE()`. `recorded_at` is `DATETIME(3)` containing Hong Kong wall time; it is not a UTC timestamp and requires no conversion. Lease timestamps use `UTC_TIMESTAMP(3)` independently of connection timezone.
 
-Each interval is attributed entirely to the **ending snapshot's date**, including an interval crossing midnight. This is sampling-based daily reporting; it cannot split an interval precisely at midnight. A failed cycle catches up on the next successful poll if the same Strata process is still running. On restart, usage between the last old-process snapshot and its shutdown is unrecoverable; only the new session's available counters can be counted. Entire sessions between polls are also unrecoverable. A model switch resetting counters without changing `started` will trigger the inconsistency check and needs investigation; use a new instance ID only when deliberately starting a new baseline.
+Each row stores `recorded_at` as the actual snapshot datetime and `usage_date` as the date of the **previous snapshot for the same instance**. The first baseline uses its own date. For example, a snapshot at `2026-10-23 00:00:02` following `2026-10-22 23:55:02` has `usage_date = 2026-10-22`. Daily reports group and filter by `usage_date`. This rule also applies after restarts and delayed polls; the whole interval belongs to its starting day. This is sampling-based daily reporting; it cannot split an interval precisely at midnight. A failed cycle catches up on the next successful poll if the same Strata process is still running. On restart, usage between the last old-process snapshot and its shutdown is unrecoverable; only the new session's available counters can be counted. Entire sessions between polls are also unrecoverable. A model switch resetting counters without changing `started` will trigger the inconsistency check and needs investigation; use a new instance ID only when deliberately starting a new baseline.
 
 ## Verification
 
 After the first manual execution, query:
 
 ```sql
-SELECT id, recorded_at, instance_id, server_started_at,
+SELECT id, recorded_at, usage_date, instance_id, server_started_at,
        input_total, output_total, input_delta, output_delta, total_delta
 FROM strata_token_usage
 WHERE instance_id = 'strata-p40'
@@ -119,9 +134,11 @@ STRATA_TEST_MYSQL=/path/to/mysql \
 STRATA_TEST_SOCKET=/path/to/test/mysql.sock node test.js
 ```
 
-Tests cover baseline, increases, unchanged counters, restart, either counter decreasing, malformed/missing metrics, invalid status, large integer precision, consecutive cycles, stale baselines, lease expiry, failed SQL rollback, eight simultaneous acquisitions, row-lock timeout skipping, and midnight reporting. For deployment verification, temporarily point a copy at an unreachable Strata URL with a distinct test instance: the HTTP node must fail with no inserted row. Test an invalid MySQL connection similarly. Keep the production instance's configuration intact.
+Tests cover baseline, increases, unchanged counters, restart, either counter decreasing, malformed/missing metrics, invalid status, large integer precision, consecutive cycles, stale baselines, lease expiry, failed SQL rollback, eight simultaneous acquisitions, row-lock timeout skipping, midnight usage dates, per-instance date baselines, and historical migration. For deployment verification, temporarily point a copy at an unreachable Strata URL with a distinct test instance: the HTTP node must fail with no inserted row. Test an invalid MySQL connection similarly. Keep the production instance's configuration intact.
 
-Validation performed: the unmodified export imported successfully through n8n 2.44.5’s CLI. All 27 offline/SQL integration checks passed against MySQL 8.4.11. A temporary test copy, using an Execute Workflow Trigger for CLI execution and the live server’s `vllm:` names, completed two live polling cycles into a disposable database with correctly reconciled deltas. Missing-metric, unreachable-Strata and unavailable-MySQL executions failed with no insertion. No production database was provisioned or schedule activated. Import through your UI and a manual run using your selected MySQL credential remain deployment verification steps.
+Usage-date validation: all 30 offline/SQL integration checks passed against a disposable MySQL 8.0.28 server, including migration backfill. No production database was changed.
+
+Historical validation before the usage-date change: the unmodified export imported successfully through n8n 2.44.5’s CLI. All 27 offline/SQL integration checks passed against MySQL 8.4.11. A temporary test copy, using an Execute Workflow Trigger for CLI execution and the live server’s `vllm:` names, completed two live polling cycles into a disposable database with correctly reconciled deltas. Missing-metric, unreachable-Strata and unavailable-MySQL executions failed with no insertion. No production database was provisioned or schedule activated. Import through your UI and a manual run using your selected MySQL credential remain deployment verification steps.
 
 ## Troubleshooting
 
