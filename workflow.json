@@ -1,0 +1,952 @@
+{
+  "updatedAt": "2026-10-22T03:44:54.777Z",
+  "createdAt": "2026-10-22T02:43:03.096Z",
+  "id": "lArcPMUR3Drl89Hr",
+  "name": "[Auto] Strata Tokens Usage",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "eccb1ba1-3af3-45c0-b754-d0d2391de60a",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "50791534-2006-472e-9558-3f7ad4e6da27",
+              "name": "instance_id",
+              "value": "strata-p40",
+              "type": "string"
+            },
+            {
+              "id": "38d2dae5-b767-4447-b227-223aa0626f4e",
+              "name": "strata_url",
+              "value": "http://10.7.7.79:8080",
+              "type": "string"
+            },
+            {
+              "id": "b99dbf86-423d-4d9e-8a6d-394344ac8bd8",
+              "name": "input_metric",
+              "value": "vllm:prompt_tokens_total",
+              "type": "string"
+            },
+            {
+              "id": "483976b5-7229-477e-9c2d-1a01288d8ec0",
+              "name": "output_metric",
+              "value": "vllm:generation_tokens_total",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "359ef656-a206-4d13-ab5b-915d1db16da4",
+      "name": "Tracker Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CALL strata_tracker_acquire($1, @tracker_acquired, @tracker_owner);\nSELECT @tracker_acquired AS acquired, @tracker_owner AS lease_owner;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ [$json.instance_id] }}",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "90bcf72b-9b18-495b-a713-3e7b2de406d9",
+      "name": "MySQL - Acquire Lease",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        448,
+        96
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "BmfH4Z5fAM6wGc9P",
+          "name": "MySQL Credentials (api usage)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5c1ceb1c-54b9-4a32-a4bb-907cd2347c60",
+              "leftValue": "={{ Number($json.acquired) === 1 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f9e5430d-e128-4817-8fbf-7cc76fc71c1c",
+      "name": "Lease Acquired?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Tracker Configuration').first().json.strata_url + '/v1/status' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "c9cdb243-9993-4cd8-8831-c523209d0384",
+      "name": "HTTP - Status Before Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        0
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "RAbWUP0vDl00ryE4",
+          "name": "Strata Endpoints Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Tracker Configuration').first().json.strata_url + '/metrics' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "text/plain"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "600d09de-c2ee-4a33-b87f-91b1bb36f8e7",
+      "name": "HTTP - Strata Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        0
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "RAbWUP0vDl00ryE4",
+          "name": "Strata Endpoints Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Tracker Configuration').first().json.strata_url + '/v1/status' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "be209bfe-d4c0-42ce-b526-a926a99c9a35",
+      "name": "HTTP - Strata Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        0
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "RAbWUP0vDl00ryE4",
+          "name": "Strata Endpoints Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// One metrics response, bracketed by status requests from the same server session.\nconst config = $('Tracker Configuration').first().json;\nconst before = $('HTTP - Status Before Metrics').first().json;\nconst after = $('HTTP - Strata Status').first().json;\nconst metrics = $('HTTP - Strata Metrics').first().json.data;\nfunction started(value) {\n  if (!Number.isSafeInteger(value) || value <= 0) {\n    throw new Error('Strata status.started must be a positive safe integer Unix timestamp');\n  }\n  return value;\n}\nconst server_started_at = started(after.started);\nif (started(before.started) !== server_started_at) {\n  throw new Error('Strata restarted while sampling; discard this cycle');\n}\nif (typeof metrics !== 'string') throw new Error('Strata /metrics must return text');\nconst names = [config.input_metric, config.output_metric];\nif (names.some(name => typeof name !== 'string' || !/^[a-zA-Z_:][a-zA-Z0-9_:]*$/.test(name)) || names[0] === names[1]) {\n  throw new Error('Configure two distinct valid Prometheus metric names');\n}\nconst values = {};\nconst max = 18446744073709551615n;\nfor (const raw of metrics.split(/\\r?\\n/)) {\n  const line = raw.trim();\n  if (!line || line.startsWith('#')) continue;\n  const name = line.match(/^([^\\s{]+)/)?.[1];\n  if (!names.includes(name)) continue;\n  // Accept an optional Prometheus label set and optional integer sample timestamp.\n  // More than one series for a required counter is ambiguous: fail instead of summing.\n  const match = line.match(/^([^\\s{]+)(?:\\{(?:[a-zA-Z_][a-zA-Z0-9_]*=\"(?:[^\"\\\\\\n]|\\\\[\\\\\"n])*\"(?:\\s*,\\s*[a-zA-Z_][a-zA-Z0-9_]*=\"(?:[^\"\\\\\\n]|\\\\[\\\\\"n])*\")*\\s*,?)?\\})?\\s+([0-9]+)(?:\\s+[0-9]+)?$/);\n  if (!match) throw new Error(`Malformed integer counter: ${name}`);\n  if (Object.hasOwn(values, name)) throw new Error(`Ambiguous duplicate counter: ${name}`);\n  const value = BigInt(match[2]);\n  if (value > max) throw new Error(`Counter exceeds MySQL BIGINT UNSIGNED: ${name}`);\n  values[name] = value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString();\n}\nfor (const name of names) {\n  if (!Object.hasOwn(values, name)) throw new Error(`Missing required Strata counter: ${name}`);\n}\nreturn [{ json: {\n  instance_id: config.instance_id,\n  recorded_at: $now.setZone('Asia/Hong_Kong').toFormat('yyyy-MM-dd HH:mm:ss.SSS'),\n  server_started_at,\n  input_total: values[names[0]],\n  output_total: values[names[1]],\n} }];"
+      },
+      "id": "e4d28029-4334-44a8-bb30-0605cde95e67",
+      "name": "Code - Parse Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, server_started_at, input_total, output_total\nFROM strata_token_usage\nWHERE instance_id = $1\nORDER BY id DESC\nLIMIT 1;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ [$json.instance_id] }}",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "a5bf1d3a-33ba-4398-b16e-84338b233d85",
+      "name": "MySQL - Get Latest Snapshot",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1792,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "BmfH4Z5fAM6wGc9P",
+          "name": "MySQL Credentials (api usage)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const current = $('Code - Parse Metrics').first().json;\nconst items = $input.all();\nif (items.length !== 1) throw new Error('Expected exactly one previous snapshot or one empty item');\nconst previous = items[0].json;\nconst max = 18446744073709551615n;\nfunction integer(value, field) {\n  if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 0)) {\n    throw new Error(`Unsafe or negative integer: ${field}`);\n  }\n  if (!/^[0-9]+$/.test(String(value))) throw new Error(`Invalid integer: ${field}`);\n  const n = BigInt(value);\n  if (n > max) throw new Error(`Integer overflow: ${field}`);\n  return n;\n}\nfunction jsonInteger(n) {\n  return n <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(n) : n.toString();\n}\nconst input = integer(current.input_total, 'input_total');\nconst output = integer(current.output_total, 'output_total');\nlet inputDelta = 0n, outputDelta = 0n;\nconst empty = Object.keys(previous).length === 0;\nif (!empty) {\n  if (integer(previous.id, 'previous.id') === 0n) throw new Error('Invalid previous snapshot id');\n  const oldStarted = integer(previous.server_started_at, 'previous.server_started_at');\n  const oldInput = integer(previous.input_total, 'previous.input_total');\n  const oldOutput = integer(previous.output_total, 'previous.output_total');\n  if (oldStarted !== integer(current.server_started_at, 'server_started_at')) {\n    inputDelta = input;\n    outputDelta = output;\n  } else {\n    if (input < oldInput || output < oldOutput) {\n      throw new Error('Counter inconsistency: counter decreased without a Strata restart; snapshot rejected');\n    }\n    inputDelta = input - oldInput;\n    outputDelta = output - oldOutput;\n  }\n}\nif (inputDelta + outputDelta > max) throw new Error('total_delta exceeds MySQL BIGINT UNSIGNED');\nreturn [{ json: { ...current,\n  previous_id: empty ? 0 : previous.id,\n  input_delta: jsonInteger(inputDelta),\n  output_delta: jsonInteger(outputDelta),\n} }];"
+      },
+      "id": "3aa7e4fb-8697-4f75-83a3-0eba96081253",
+      "name": "Code - Calculate Usage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CALL strata_tracker_insert($1, $2, $3,\n  CAST(SUBSTRING($4, 2) AS UNSIGNED), CAST(SUBSTRING($5, 2) AS UNSIGNED), CAST(SUBSTRING($6, 2) AS UNSIGNED), CAST(SUBSTRING($7, 2) AS UNSIGNED), CAST(SUBSTRING($8, 2) AS UNSIGNED), CAST(SUBSTRING($9, 2) AS UNSIGNED));",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ [$json.instance_id, $('MySQL - Acquire Lease').first().json.lease_owner, $json.recorded_at, ...['server_started_at','input_total','output_total','input_delta','output_delta','previous_id'].map(k => 'n' + $json[k])] }}",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "6cd86d5b-0e42-40c4-8c4c-3e3cfa3d5c17",
+      "name": "MySQL - Insert Snapshot",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        2240,
+        0
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "BmfH4Z5fAM6wGc9P",
+          "name": "MySQL Credentials (api usage)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "5c368afb-c928-4cb5-afc0-3e74db7cee4d",
+      "name": "Skip Busy Cycle",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        896,
+        192
+      ]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Tracker Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tracker Configuration": {
+      "main": [
+        [
+          {
+            "node": "MySQL - Acquire Lease",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MySQL - Acquire Lease": {
+      "main": [
+        [
+          {
+            "node": "Lease Acquired?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Status Before Metrics": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Strata Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Strata Metrics": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Strata Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Strata Status": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Metrics": {
+      "main": [
+        [
+          {
+            "node": "MySQL - Get Latest Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MySQL - Get Latest Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Code - Calculate Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Calculate Usage": {
+      "main": [
+        [
+          {
+            "node": "MySQL - Insert Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lease Acquired?": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Status Before Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Busy Cycle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timezone": "Asia/Hong_Kong",
+    "executionTimeout": 90
+  },
+  "staticData": {
+    "node:Every 5 Minutes": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "69066844-22e3-4c92-8f40-52340a5ad8ba",
+  "activeVersionId": "69066844-22e3-4c92-8f40-52340a5ad8ba",
+  "versionCounter": 18,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-10-22T02:43:03.096Z",
+      "createdAt": "2026-10-22T02:43:03.096Z",
+      "role": "workflow:owner",
+      "workflowId": "lArcPMUR3Drl89Hr",
+      "projectId": "XhmV4nmoOTmTy4s1",
+      "project": {
+        "updatedAt": "2026-03-21T06:57:16.457Z",
+        "createdAt": "2026-03-21T06:46:17.638Z",
+        "id": "XhmV4nmoOTmTy4s1",
+        "name": "KW Wong <products@alohaonline.asia>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "542d76b8-a38c-4d95-bec3-03986358eaa8"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-10-22T03:44:39.763Z",
+    "createdAt": "2026-10-22T03:31:06.258Z",
+    "versionId": "69066844-22e3-4c92-8f40-52340a5ad8ba",
+    "workflowId": "lArcPMUR3Drl89Hr",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes"
+              }
+            ]
+          }
+        },
+        "id": "eccb1ba1-3af3-45c0-b754-d0d2391de60a",
+        "name": "Every 5 Minutes",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          0,
+          96
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "50791534-2006-472e-9558-3f7ad4e6da27",
+                "name": "instance_id",
+                "value": "strata-p40",
+                "type": "string"
+              },
+              {
+                "id": "38d2dae5-b767-4447-b227-223aa0626f4e",
+                "name": "strata_url",
+                "value": "http://10.7.7.79:8080",
+                "type": "string"
+              },
+              {
+                "id": "b99dbf86-423d-4d9e-8a6d-394344ac8bd8",
+                "name": "input_metric",
+                "value": "vllm:prompt_tokens_total",
+                "type": "string"
+              },
+              {
+                "id": "483976b5-7229-477e-9c2d-1a01288d8ec0",
+                "name": "output_metric",
+                "value": "vllm:generation_tokens_total",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "359ef656-a206-4d13-ab5b-915d1db16da4",
+        "name": "Tracker Configuration",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          224,
+          96
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "CALL strata_tracker_acquire($1, @tracker_acquired, @tracker_owner);\nSELECT @tracker_acquired AS acquired, @tracker_owner AS lease_owner;",
+          "options": {
+            "queryBatching": "single",
+            "queryReplacement": "={{ [$json.instance_id] }}",
+            "largeNumbersOutput": "text"
+          }
+        },
+        "id": "90bcf72b-9b18-495b-a713-3e7b2de406d9",
+        "name": "MySQL - Acquire Lease",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.5,
+        "position": [
+          448,
+          96
+        ],
+        "credentials": {
+          "mySql": {
+            "id": "BmfH4Z5fAM6wGc9P",
+            "name": "MySQL Credentials (api usage)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "5c1ceb1c-54b9-4a32-a4bb-907cd2347c60",
+                "leftValue": "={{ Number($json.acquired) === 1 }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "f9e5430d-e128-4817-8fbf-7cc76fc71c1c",
+        "name": "Lease Acquired?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          672,
+          96
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Tracker Configuration').first().json.strata_url + '/v1/status' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "c9cdb243-9993-4cd8-8831-c523209d0384",
+        "name": "HTTP - Status Before Metrics",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          896,
+          0
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "RAbWUP0vDl00ryE4",
+            "name": "Strata Endpoints Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Tracker Configuration').first().json.strata_url + '/metrics' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Accept",
+                "value": "text/plain"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "text"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "600d09de-c2ee-4a33-b87f-91b1bb36f8e7",
+        "name": "HTTP - Strata Metrics",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1120,
+          0
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "RAbWUP0vDl00ryE4",
+            "name": "Strata Endpoints Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Tracker Configuration').first().json.strata_url + '/v1/status' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "be209bfe-d4c0-42ce-b526-a926a99c9a35",
+        "name": "HTTP - Strata Status",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1344,
+          0
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "RAbWUP0vDl00ryE4",
+            "name": "Strata Endpoints Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// One metrics response, bracketed by status requests from the same server session.\nconst config = $('Tracker Configuration').first().json;\nconst before = $('HTTP - Status Before Metrics').first().json;\nconst after = $('HTTP - Strata Status').first().json;\nconst metrics = $('HTTP - Strata Metrics').first().json.data;\nfunction started(value) {\n  if (!Number.isSafeInteger(value) || value <= 0) {\n    throw new Error('Strata status.started must be a positive safe integer Unix timestamp');\n  }\n  return value;\n}\nconst server_started_at = started(after.started);\nif (started(before.started) !== server_started_at) {\n  throw new Error('Strata restarted while sampling; discard this cycle');\n}\nif (typeof metrics !== 'string') throw new Error('Strata /metrics must return text');\nconst names = [config.input_metric, config.output_metric];\nif (names.some(name => typeof name !== 'string' || !/^[a-zA-Z_:][a-zA-Z0-9_:]*$/.test(name)) || names[0] === names[1]) {\n  throw new Error('Configure two distinct valid Prometheus metric names');\n}\nconst values = {};\nconst max = 18446744073709551615n;\nfor (const raw of metrics.split(/\\r?\\n/)) {\n  const line = raw.trim();\n  if (!line || line.startsWith('#')) continue;\n  const name = line.match(/^([^\\s{]+)/)?.[1];\n  if (!names.includes(name)) continue;\n  // Accept an optional Prometheus label set and optional integer sample timestamp.\n  // More than one series for a required counter is ambiguous: fail instead of summing.\n  const match = line.match(/^([^\\s{]+)(?:\\{(?:[a-zA-Z_][a-zA-Z0-9_]*=\"(?:[^\"\\\\\\n]|\\\\[\\\\\"n])*\"(?:\\s*,\\s*[a-zA-Z_][a-zA-Z0-9_]*=\"(?:[^\"\\\\\\n]|\\\\[\\\\\"n])*\")*\\s*,?)?\\})?\\s+([0-9]+)(?:\\s+[0-9]+)?$/);\n  if (!match) throw new Error(`Malformed integer counter: ${name}`);\n  if (Object.hasOwn(values, name)) throw new Error(`Ambiguous duplicate counter: ${name}`);\n  const value = BigInt(match[2]);\n  if (value > max) throw new Error(`Counter exceeds MySQL BIGINT UNSIGNED: ${name}`);\n  values[name] = value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString();\n}\nfor (const name of names) {\n  if (!Object.hasOwn(values, name)) throw new Error(`Missing required Strata counter: ${name}`);\n}\nreturn [{ json: {\n  instance_id: config.instance_id,\n  recorded_at: $now.setZone('Asia/Hong_Kong').toFormat('yyyy-MM-dd HH:mm:ss.SSS'),\n  server_started_at,\n  input_total: values[names[0]],\n  output_total: values[names[1]],\n} }];"
+        },
+        "id": "e4d28029-4334-44a8-bb30-0605cde95e67",
+        "name": "Code - Parse Metrics",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1568,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT id, server_started_at, input_total, output_total\nFROM strata_token_usage\nWHERE instance_id = $1\nORDER BY id DESC\nLIMIT 1;",
+          "options": {
+            "queryBatching": "single",
+            "queryReplacement": "={{ [$json.instance_id] }}",
+            "largeNumbersOutput": "text"
+          }
+        },
+        "id": "a5bf1d3a-33ba-4398-b16e-84338b233d85",
+        "name": "MySQL - Get Latest Snapshot",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.5,
+        "position": [
+          1792,
+          0
+        ],
+        "alwaysOutputData": true,
+        "credentials": {
+          "mySql": {
+            "id": "BmfH4Z5fAM6wGc9P",
+            "name": "MySQL Credentials (api usage)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const current = $('Code - Parse Metrics').first().json;\nconst items = $input.all();\nif (items.length !== 1) throw new Error('Expected exactly one previous snapshot or one empty item');\nconst previous = items[0].json;\nconst max = 18446744073709551615n;\nfunction integer(value, field) {\n  if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 0)) {\n    throw new Error(`Unsafe or negative integer: ${field}`);\n  }\n  if (!/^[0-9]+$/.test(String(value))) throw new Error(`Invalid integer: ${field}`);\n  const n = BigInt(value);\n  if (n > max) throw new Error(`Integer overflow: ${field}`);\n  return n;\n}\nfunction jsonInteger(n) {\n  return n <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(n) : n.toString();\n}\nconst input = integer(current.input_total, 'input_total');\nconst output = integer(current.output_total, 'output_total');\nlet inputDelta = 0n, outputDelta = 0n;\nconst empty = Object.keys(previous).length === 0;\nif (!empty) {\n  if (integer(previous.id, 'previous.id') === 0n) throw new Error('Invalid previous snapshot id');\n  const oldStarted = integer(previous.server_started_at, 'previous.server_started_at');\n  const oldInput = integer(previous.input_total, 'previous.input_total');\n  const oldOutput = integer(previous.output_total, 'previous.output_total');\n  if (oldStarted !== integer(current.server_started_at, 'server_started_at')) {\n    inputDelta = input;\n    outputDelta = output;\n  } else {\n    if (input < oldInput || output < oldOutput) {\n      throw new Error('Counter inconsistency: counter decreased without a Strata restart; snapshot rejected');\n    }\n    inputDelta = input - oldInput;\n    outputDelta = output - oldOutput;\n  }\n}\nif (inputDelta + outputDelta > max) throw new Error('total_delta exceeds MySQL BIGINT UNSIGNED');\nreturn [{ json: { ...current,\n  previous_id: empty ? 0 : previous.id,\n  input_delta: jsonInteger(inputDelta),\n  output_delta: jsonInteger(outputDelta),\n} }];"
+        },
+        "id": "3aa7e4fb-8697-4f75-83a3-0eba96081253",
+        "name": "Code - Calculate Usage",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2016,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "CALL strata_tracker_insert($1, $2, $3,\n  CAST(SUBSTRING($4, 2) AS UNSIGNED), CAST(SUBSTRING($5, 2) AS UNSIGNED), CAST(SUBSTRING($6, 2) AS UNSIGNED), CAST(SUBSTRING($7, 2) AS UNSIGNED), CAST(SUBSTRING($8, 2) AS UNSIGNED), CAST(SUBSTRING($9, 2) AS UNSIGNED));",
+          "options": {
+            "queryBatching": "single",
+            "queryReplacement": "={{ [$json.instance_id, $('MySQL - Acquire Lease').first().json.lease_owner, $json.recorded_at, ...['server_started_at','input_total','output_total','input_delta','output_delta','previous_id'].map(k => 'n' + $json[k])] }}",
+            "largeNumbersOutput": "text"
+          }
+        },
+        "id": "6cd86d5b-0e42-40c4-8c4c-3e3cfa3d5c17",
+        "name": "MySQL - Insert Snapshot",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.5,
+        "position": [
+          2240,
+          0
+        ],
+        "credentials": {
+          "mySql": {
+            "id": "BmfH4Z5fAM6wGc9P",
+            "name": "MySQL Credentials (api usage)"
+          }
+        }
+      },
+      {
+        "parameters": {},
+        "id": "5c368afb-c928-4cb5-afc0-3e74db7cee4d",
+        "name": "Skip Busy Cycle",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          896,
+          192
+        ]
+      }
+    ],
+    "connections": {
+      "Every 5 Minutes": {
+        "main": [
+          [
+            {
+              "node": "Tracker Configuration",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tracker Configuration": {
+        "main": [
+          [
+            {
+              "node": "MySQL - Acquire Lease",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MySQL - Acquire Lease": {
+        "main": [
+          [
+            {
+              "node": "Lease Acquired?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP - Status Before Metrics": {
+        "main": [
+          [
+            {
+              "node": "HTTP - Strata Metrics",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP - Strata Metrics": {
+        "main": [
+          [
+            {
+              "node": "HTTP - Strata Status",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP - Strata Status": {
+        "main": [
+          [
+            {
+              "node": "Code - Parse Metrics",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Parse Metrics": {
+        "main": [
+          [
+            {
+              "node": "MySQL - Get Latest Snapshot",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MySQL - Get Latest Snapshot": {
+        "main": [
+          [
+            {
+              "node": "Code - Calculate Usage",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code - Calculate Usage": {
+        "main": [
+          [
+            {
+              "node": "MySQL - Insert Snapshot",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lease Acquired?": {
+        "main": [
+          [
+            {
+              "node": "HTTP - Status Before Metrics",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Skip Busy Cycle",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "KW Wong",
+    "name": "Version 69066844",
+    "description": "",
+    "autosaved": true,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-10-22T03:44:39.730Z",
+        "id": 658,
+        "workflowId": "lArcPMUR3Drl89Hr",
+        "versionId": "69066844-22e3-4c92-8f40-52340a5ad8ba",
+        "event": "activated",
+        "userId": "542d76b8-a38c-4d95-bec3-03986358eaa8"
+      }
+    ]
+  }
+}
