@@ -54,7 +54,7 @@ test('consecutive executions do not double count', () => {
   const next = calc(current, { ...r, id: 2 });
   assert.equal(next.input_delta + next.output_delta, 0);
 });
-test('midnight interval belongs to ending snapshot date', () => {
+test('midnight observation retains its actual timestamp', () => {
   const r = calc(parse(metric(), undefined, undefined, '2026-10-22 00:02:00.000'), previous);
   assert.equal(r.recorded_at.slice(0, 10), '2026-10-22'); assert.equal(r.input_delta, 10);
 });
@@ -160,7 +160,29 @@ async function databaseTests() {
     });
     query("UPDATE strata_tracker_leases SET expires_at = UTC_TIMESTAMP(3) - INTERVAL 1 SECOND;");
     owner = acquire()[1]; query(insert(owner, 3, 120, 30, 10, 5, 'strata-p40', '2026-10-22 00:02:00.000'));
-    test('SQL midnight reporting uses snapshot date', () => assert.equal(query("SELECT SUM(total_delta) FROM strata_token_usage WHERE DATE(recorded_at) = '2026-10-22';"), '15'));
+    const midnightId = query("SELECT MAX(id) FROM strata_token_usage WHERE instance_id = 'strata-p40';");
+    test('SQL midnight usage belongs to previous snapshot date', () => {
+      assert.equal(query(`SELECT recorded_at, usage_date FROM strata_token_usage WHERE id = ${midnightId};`), '2026-10-22 00:02:00.000\t2026-10-21');
+      assert.equal(query("SELECT SUM(total_delta) FROM strata_token_usage WHERE usage_date = '2026-10-21';"), '30');
+      assert.equal(query("SELECT COUNT(*) FROM strata_token_usage WHERE usage_date = '2026-10-22';"), '0');
+    });
+    owner = acquire()[1]; query(insert(owner, midnightId, 130, 35, 10, 5, 'strata-p40', '2026-10-22 00:07:00.000'));
+    test('SQL next interval uses current day', () => {
+      assert.equal(query("SELECT usage_date FROM strata_token_usage WHERE instance_id = 'strata-p40' ORDER BY id DESC LIMIT 1;"), '2026-10-22');
+    });
+    owner = acquire('other-instance')[1];
+    query(insert(owner, 0, 0, 0, 0, 0, 'other-instance', '2026-10-23 00:02:00.000'));
+    test('SQL first snapshot uses own date independently per instance', () => {
+      assert.equal(query("SELECT usage_date FROM strata_token_usage WHERE instance_id = 'other-instance';"), '2026-10-23');
+    });
+    const datesBeforeMigration = query('SELECT id, usage_date FROM strata_token_usage ORDER BY id;');
+    query('ALTER TABLE strata_token_usage DROP INDEX idx_instance_usage_date, DROP COLUMN usage_date;');
+    sql(fs.readFileSync(path.join(__dirname, 'migrations/001_usage_date.sql'), 'utf8'));
+    sql(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+    test('SQL migration backfills historical dates per instance and preserves totals', () => {
+      assert.equal(query('SELECT id, usage_date FROM strata_token_usage ORDER BY id;'), datesBeforeMigration);
+      assert.equal(query('SELECT SUM(total_delta) FROM strata_token_usage;'), '45');
+    });
     const parallelAcquire = () => new Promise((resolve, reject) => {
       const p = spawn(process.env.STRATA_TEST_MYSQL, [...args, database]); let result = '', error = '';
       p.stdout.on('data', b => result += b); p.stderr.on('data', b => error += b);

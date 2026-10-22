@@ -5,6 +5,7 @@ SET SESSION time_zone = '+08:00';
 CREATE TABLE IF NOT EXISTS strata_token_usage (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     recorded_at DATETIME(3) NOT NULL,
+    usage_date DATE NOT NULL,
     instance_id VARCHAR(100) COLLATE utf8mb4_bin NOT NULL,
     server_started_at BIGINT UNSIGNED NOT NULL,
     input_total BIGINT UNSIGNED NOT NULL,
@@ -14,7 +15,8 @@ CREATE TABLE IF NOT EXISTS strata_token_usage (
     total_delta BIGINT UNSIGNED
         GENERATED ALWAYS AS (input_delta + output_delta) STORED,
     INDEX idx_instance_latest (instance_id, id),
-    INDEX idx_recorded_at (recorded_at)
+    INDEX idx_recorded_at (recorded_at),
+    INDEX idx_instance_usage_date (instance_id, usage_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 -- One durable lease per instance; independent of n8n's connection pool.
@@ -82,6 +84,7 @@ BEGIN
     DECLARE v_owner CHAR(36) DEFAULT NULL;
     DECLARE v_expires DATETIME(3) DEFAULT NULL;
     DECLARE v_latest BIGINT UNSIGNED DEFAULT 0;
+    DECLARE v_usage_date DATE;
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         ROLLBACK;
@@ -102,10 +105,14 @@ BEGIN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Strata previous snapshot changed; snapshot rejected';
     END IF;
+    -- Attribute the interval to its starting snapshot, retaining the observation time.
+    -- The initial baseline has zero deltas and uses its own date.
+    SELECT COALESCE(MAX(DATE(recorded_at)), DATE(p_recorded)) INTO v_usage_date
+    FROM strata_token_usage WHERE instance_id = p_instance AND id = p_previous_id;
     INSERT INTO strata_token_usage
-        (recorded_at, instance_id, server_started_at, input_total, output_total,
+        (recorded_at, usage_date, instance_id, server_started_at, input_total, output_total,
          input_delta, output_delta)
-    VALUES (p_recorded, p_instance, p_started, p_input, p_output,
+    VALUES (p_recorded, v_usage_date, p_instance, p_started, p_input, p_output,
             p_input_delta, p_output_delta);
     -- Insert and release commit together. Errors leave the lease to expire.
     UPDATE strata_tracker_leases
@@ -119,15 +126,15 @@ DELIMITER ;
 -- Fixed offset works without installing MySQL timezone tables (Hong Kong = UTC+8).
 SET SESSION time_zone = '+08:00';
 
--- Daily consumption (the complete interval belongs to the ending snapshot date).
+-- Daily consumption (the complete interval belongs to the starting snapshot date).
 SELECT
-    DATE(recorded_at) AS usage_date,
+    usage_date,
     SUM(input_delta) AS input_tokens,
     SUM(output_delta) AS output_tokens,
     SUM(total_delta) AS total_tokens
 FROM strata_token_usage
 WHERE instance_id = 'strata-p40'
-GROUP BY DATE(recorded_at)
+GROUP BY usage_date
 ORDER BY usage_date DESC;
 
 -- Today's consumption in Hong Kong.
@@ -137,5 +144,4 @@ SELECT
     COALESCE(SUM(total_delta), 0) AS total_tokens
 FROM strata_token_usage
 WHERE instance_id = 'strata-p40'
-  AND recorded_at >= CURRENT_DATE()
-  AND recorded_at < CURRENT_DATE() + INTERVAL 1 DAY;
+  AND usage_date = CURRENT_DATE();
